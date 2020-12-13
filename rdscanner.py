@@ -90,7 +90,7 @@ def scan(list_of_recipe_paths, find_all=False):
         logging.critical(names)
 
     # convert to buckets (assumes non cyclic dependencies)
-    # this is between O(n) and O(n^2) complexity, as need to loop over a list reducing in size each iteration
+    # this is between O(n) and O(n^2) complexity, as need to loop over a list reducing in size (at a variable rate) each iteration
     # Algorithm:
     # - find all dependencies with zero dependencies - this is the first bucket - remove these from the outstanding list
     # - while outstanding packages remain
