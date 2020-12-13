@@ -4,8 +4,12 @@
 Dependency scanner for Conan recipes.
 Output: A list of lists of recipe build orders, satisfying dependencies
 
+Input:
+ - Either: a number of paths to conanfile.py's, and the dependencies just between them are determined
+ - Or: --all, assumes to be running in the root directory containing recipes, loads all recipes, figures out their build order from the ground up
+
 # TODO: use regex instead of conan inspect --raw name to get the name, e.g. /s*name/s*=/s*([A-zA-z0-9]+)
-# TODO: for a given changed recipe(s), load all recipes, figure out what depends on then
+# TODO: alternative mode to -all, specify a starting (--start-recipe-path) point, instead of those with zero dependencies
 """
 
 import argparse
