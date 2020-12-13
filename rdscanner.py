@@ -215,7 +215,7 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
 
 def _print_buckets(buckets):
     for i, b in enumerate(buckets):
-        names = set([p["name"] for p in b])
+        names = sorted(list(set([p["name"] for p in b])), key=str.casefold)
         logging.critical(f"Bucket {i}: {names}")
 
 
