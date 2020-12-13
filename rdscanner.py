@@ -30,11 +30,20 @@ PACKAGEREFERENCEREGEX = re.compile("|".join([PACKAGENAME, PACKAGEREFERENCE]))
 
 
 def _get_package_name(recipe_path):
+    """
+    Get the package name using 'conan inspect'.
+    This is slow.
+    Returns a string.
+    """
     output = subprocess.check_output(["conan", "inspect", "--raw", "name", recipe_path])
     return output.decode("utf8").strip()
 
 
 def _extract_recipe_details(recipe_path):
+    """
+    Extract package name and a list of dependent package names (runtime and buildtime) from the specified recipe.
+    Returns a tuple containing a string and a list of strings.
+    """
     name = None
     dependents = []
     for i, line in enumerate(open(recipe_path, "rt")):
@@ -53,6 +62,9 @@ def _extract_recipe_details(recipe_path):
 
 
 def scan(list_of_recipe_paths, find_all, verify):
+    """
+    Scan the list of recipe paths, and convert to buckets of packages, satisfying dependencies, that can be built in parallel
+    """
     if find_all:
         list_of_recipe_paths = [path for path in pathlib.Path.cwd().glob("**/conanfile.py") if path.parent.name != "test_package"]
     if not list_of_recipe_paths:
