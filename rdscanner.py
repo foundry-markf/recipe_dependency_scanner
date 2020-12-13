@@ -9,8 +9,8 @@ Input:
    - Use case: continuous integration
  - Or: --all, assumes to be running in the root directory containing recipes, loads all recipes, figures out their build order from the ground up
    - Use case: New VFX refspec build
- - Or: --downstream-from=<recipe path>, figures out the downstream build order from that specified
-   - Use case: Problem found in package A, and implies needing to update all downstream dependees of A
+ - Or: --downstream-from=<package name>, figures out the downstream build order from that specified
+   - Use case: Problem found in package A, and implies needing to update all downstream consumers of A (recursively)
 
 TODO: does the --downstream-from option need to be expanded to have multiple starting points? possibly an unlikely use case
 """
@@ -144,9 +144,8 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
     #   - if nothing has been added to the next bucket - ERROR
 
     if downstream_from:
-        downstream_package = [package for package in packages if downstream_from in str(package["path"])]
-        assert len(downstream_package) == 1, f"Unable to find the starting recipe '{downstream_from}' in all recipe paths"
-        downstream_package_name = downstream_package[0]["name"]
+        downstream_package = [package for package in packages if package["name"] == downstream_from]
+        assert len(downstream_package) == 1, f"Unable to find the starting package called '{downstream_from}' in all recipe paths. Check the case."
 
     buckets = []
     # those without any dependencies can be built initially
@@ -183,7 +182,7 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
         # this performs post-processing to cull the buckets of unnecessary packages
         # find the bucket that the downstream starting package lives in, removing earlier buckets
         while buckets:
-            found = [p for p in buckets[0] if p["name"] == downstream_package_name]
+            found = [p for p in buckets[0] if p["name"] == downstream_from]
             buckets.pop(0)
             if found:
                 buckets.insert(0, found)
@@ -224,14 +223,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scan recipes for dependencies to determine a build order of packages grouped into buckets that can be built in parallel")
     parser.add_argument("--all", action="store_true", help="Glob for conanfile.py recursively from the current directory to find all recipes")
     parser.add_argument("--verify", action="store_true", help="Verify the recipe name found by invoking 'conan inspect'. This is slow.")
-    parser.add_argument("--downstream-from", help="Specify the recipe to start from, and add all downstream consumers of it, recursively. Implies --all.")
+    parser.add_argument("--downstream-from", help="Specify the package name to start from, and add all downstream consumers of it, recursively. Implies --all in order to locate the package name in a recipe.")
     parser.add_argument("recipe_paths", nargs="*", help="One or more paths to conanfile.py for each recipe to organise into build order.")
     args = parser.parse_args()
     buckets = scan(args.recipe_paths, find_all=args.all, verify=args.verify, downstream_from=args.downstream_from)
 
     logging.critical(f"There were {len(buckets)} buckets of packages determined")
     if args.downstream_from:
-        logging.critical("Listing from the downstream recipe that depends on it (recursively), this is the package build order:")
+        logging.critical(f"Listing from package {args.downstream_from} to all consuming downstream recipes (recursively), this is the package build order:")
     else:
         logging.critical("Listing from fewest dependencies to most dependencies, this is the package build order:")
     _print_buckets(buckets)
