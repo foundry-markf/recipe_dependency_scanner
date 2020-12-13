@@ -23,18 +23,19 @@ import re
 import subprocess
 import sys
 
-
+# see https://docs.conan.io/en/latest/reference/conanfile/attributes.html#name
+CONAN_PACKAGENAME = "[a-zA-Z0-9_][a-zA-Z0-9_\+\.-]{1,50}"
 # regex to find the name attribute in a recipe
-PACKAGENAME = r"\bname\s*=\s*['\"]([a-zA-z0-9]+)['\"]"
+PACKAGENAME_ATTR = fr"\bname\b\s*=\s*['\"]({CONAN_PACKAGENAME})['\"]"
 
 # regex that scans for "name/version[@" that maps to the name and version of a Conan package reference
 # this will pick up the requires/build_requires attribute (scalar, list, tuple versions) as well as self.requires and self.build_requires
 # function arguments
 # the {} in the version match is for using {}.format to parameterise the version (should also pick up on f-strings)
-PACKAGEREFERENCE  = r"['\"]([^/@][A-Za-z0-9_\.]+)/(?:[A-Za-z0-9\._{}^@^\"]+)[@|'\"]"
+PACKAGEREFERENCE  = fr"['\"]([^/@]{CONAN_PACKAGENAME})/(?:[A-Za-z0-9\._{{}}^@^\"]+)[@|'\"]"
 
 # combined regex
-PACKAGEREFERENCEREGEX = re.compile("|".join([PACKAGENAME, PACKAGEREFERENCE]))
+PACKAGEREFERENCEREGEX = re.compile("|".join([PACKAGENAME_ATTR, PACKAGEREFERENCE]))
 
 
 def _get_package_name(recipe_path):
