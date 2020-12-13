@@ -34,7 +34,7 @@ def _get_package_name(recipe_path):
     return output.decode("utf8").strip()
 
 
-def _get_recipe_dependents(recipe_path):
+def _extract_recipe_details(recipe_path):
     name = None
     dependents = []
     for i, line in enumerate(open(recipe_path, "rt")):
@@ -63,7 +63,7 @@ def scan(list_of_recipe_paths, find_all, verify):
     logging.debug(f"{len(list_of_recipe_paths)} recipes to scan")
     for path in list_of_recipe_paths:
         logging.debug(f"Scanning recipe: {pathlib.Path.cwd() / path}")
-        name, dependents = _get_recipe_dependents(path)
+        name, dependents = _extract_recipe_details(path)
         logging.debug(f"Package name: '{name}'")
         if verify:
             pkg_name_from_conan = _get_package_name(path)
