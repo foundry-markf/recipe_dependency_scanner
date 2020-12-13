@@ -1,5 +1,13 @@
 #!/usr/bin/env python
 
+"""
+Dependency scanner for Conan recipes.
+Output: A list of lists of recipe build orders, satisfying dependencies
+
+# TODO: use regex instead of conan inspect --raw name to get the name, e.g. /s*name/s*=/s*([A-zA-z0-9]+)
+# TODO: for a given changed recipe(s), load all recipes, figure out what depends on then
+"""
+
 import argparse
 import logging
 import os
@@ -81,7 +89,17 @@ def scan(list_of_recipe_paths, find_all=False):
         logging.critical(f"Bucket {index}:")
         logging.critical(names)
 
-    # convert to buckets
+    # convert to buckets (assumes non cyclic dependencies)
+    # this is between O(n) and O(n^2) complexity, as need to loop over a list reducing in size each iteration
+    # Algorithm:
+    # - find all dependencies with zero dependencies - this is the first bucket - remove these from the outstanding list
+    # - while outstanding packages remain
+    #   - get a list of package names from all existing buckets
+    #   - for each outstanding package:
+    #     - are all of its dependencies in a bucket?
+    #       - YES: add package to the next bucket
+    #       - NO; leave it to be processed in another bucket
+    #   - if nothing has been added to the next bucket - ERROR
     buckets = []
     # those without any dependencies
     bucket0 = [package for package in packages if "dependents" not in package]
