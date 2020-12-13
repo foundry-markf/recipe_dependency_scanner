@@ -6,9 +6,13 @@ Output: A list of lists of recipe build orders, satisfying dependencies
 
 Input:
  - Either: a number of paths to conanfile.py's, and the dependencies just between them are determined
+   - Use case: continuous integration
  - Or: --all, assumes to be running in the root directory containing recipes, loads all recipes, figures out their build order from the ground up
+   - Use case: New VFX refspec build
+ - Or: --downstream-from=<recipe path>, figures out the downstream build order from that specified
+   - Use case: Problem found in package A, and implies needing to update all downstream dependees of A
 
-# TODO: alternative mode to -all, specify a starting (--start-recipe-path) point, instead of those with zero dependencies
+TODO: does the --downstream-from option need to be expanded to have multiple starting points? possibly an unlikely use case
 """
 
 import argparse
@@ -20,12 +24,16 @@ import subprocess
 import sys
 
 
+# regex to find the name attribute in a recipe
+PACKAGENAME = r"\bname\s*=\s*['\"]([a-zA-z0-9]+)['\"]"
+
 # regex that scans for "name/version[@" that maps to the name and version of a Conan package reference
 # this will pick up the requires/build_requires attribute (scalar, list, tuple versions) as well as self.requires and self.build_requires
 # function arguments
 # the {} in the version match is for using {}.format to parameterise the version (should also pick up on f-strings)
-PACKAGENAME = r"\bname\s*=\s*['\"]([a-zA-z0-9]+)['\"]"
 PACKAGEREFERENCE  = r"['\"]([^/@][A-Za-z0-9_\.]+)/(?:[A-Za-z0-9\._{}^@^\"]+)[@|'\"]"
+
+# combined regex
 PACKAGEREFERENCEREGEX = re.compile("|".join([PACKAGENAME, PACKAGEREFERENCE]))
 
 
@@ -61,10 +69,16 @@ def _extract_recipe_details(recipe_path):
     return name, dependents
 
 
-def scan(list_of_recipe_paths, find_all, verify):
+def scan(list_of_recipe_paths, find_all, verify, downstream_from):
     """
-    Scan the list of recipe paths, and convert to buckets of packages, satisfying dependencies, that can be built in parallel
+    Scan the list of recipe paths, and convert to buckets of packages, satisfying dependencies, that can be built in parallel.
+
+    Optionally scan the current directory for all conanfile.py files.
+    Optionally verify the package names extracted by regex from the recipe files using slower conan CLI commands.
+    Optionally find all downstream packages from a named starting recipe.
     """
+    if downstream_from:
+        find_all=True
     if find_all:
         list_of_recipe_paths = [path for path in pathlib.Path.cwd().glob("**/conanfile.py") if path.parent.name != "test_package"]
     if not list_of_recipe_paths:
@@ -109,11 +123,6 @@ def scan(list_of_recipe_paths, find_all, verify):
         else:
             logging.debug(f"{p['name']}: {p['path']}")
 
-    def print_bucket(bucket, index):
-        names = [b["name"] for b in bucket]
-        logging.critical(f"Bucket {index}:")
-        logging.critical(names)
-
     # convert to buckets (assumes non cyclic dependencies)
     # this is between O(n) and O(n^2) complexity, as need to loop over a list reducing in size (at a variable rate) each iteration
     # Algorithm:
@@ -125,25 +134,31 @@ def scan(list_of_recipe_paths, find_all, verify):
     #       - YES: add package to the next bucket
     #       - NO; leave it to be processed in another bucket
     #   - if nothing has been added to the next bucket - ERROR
+
+    if downstream_from:
+        downstream_package = [package for package in packages if downstream_from in str(package["path"])]
+        assert len(downstream_package) == 1, f"Unable to find the starting recipe '{downstream_from}' in all recipe paths"
+        downstream_package_name = downstream_package[0]["name"]
+
     buckets = []
-    # those without any dependencies
+    # those without any dependencies can be built initially
     bucket0 = [package for package in packages if "dependents" not in package]
     if bucket0:
         buckets.append(bucket0)
         for p in bucket0:
             packages.remove(p)
-    # now scan for all those remaining that can completely satisfy their dependencies in the buckets
+    # now scan for all those remaining that can completely satisfy their dependencies in the existing buckets
+    # once all packages that can be satisfied with existing buckets are found, these form the next bucket
+    # continue until all packages are exhausted
     while packages:
         next_bucket = []
-        bucketed_names = []
-        for b in buckets:
-            bucketed_names.extend([p["name"] for p in b])
+        bucketed_names = [p["name"] for b in buckets for p in b]
         logging.debug(f"Bucketed names so far: {bucketed_names}")
         for p in packages:
             logging.debug(f"Considering package dependencies for recipe: {p['name']}")
             found_all = True
             for d in p["dependents"]:
-                logging.debug(f"Looking for {d}")
+                logging.debug(f"\tLooking for {d}")
                 if d not in bucketed_names:
                     found_all = False
                     break
@@ -156,10 +171,44 @@ def scan(list_of_recipe_paths, find_all, verify):
         else:
             raise RuntimeError("Unable to resolve any packages that can be built next")
 
-    logging.debug(f"There were {len(buckets)} buckets of packages determined")
-    logging.debug("Listing from fewest dependencies to most dependencies, this is the package build order:")
+    if downstream_from:
+        # this performs post-processing to cull the buckets of unnecessary packages
+        # find the bucket that the downstream starting package lives in, removing earlier buckets
+        while buckets:
+            found = [p for p in buckets[0] if p["name"] == downstream_package_name]
+            buckets.pop(0)
+            if found:
+                buckets.insert(0, found)
+                break
+
+        # cull any downstream recipes that don't have any of the bucketed packages as dependents
+        up_to_bucket = 1
+        for b in buckets[1:]:
+            bucketed_names = [p["name"] for b in buckets[:up_to_bucket] for p in b]
+            to_cull = []
+            for p in b:
+                found_any = False
+                for d in p["dependents"]:
+                    logging.debug(f"\tLooking for {d}")
+                    if d in bucketed_names:
+                        found_any = True
+                        break
+                if not found_any:
+                    to_cull.append(p)
+            for c in to_cull:
+                logging.debug(f"Culling unrelated '{c['name']}' from bucket {up_to_bucket}")
+                b.remove(c)
+            up_to_bucket += 1
+        # there may now be empty buckets
+        buckets = [b for b in buckets if b]
+
+    return buckets
+
+
+def _print_buckets(buckets):
     for i, b in enumerate(buckets):
-        print_bucket(b, i)
+        names = [p["name"] for p in b]
+        logging.critical(f"Bucket {i}: {names}")
 
 
 if __name__ == "__main__":
@@ -167,6 +216,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scan recipes for dependencies to determine a build order of packages grouped into buckets that can be built in parallel")
     parser.add_argument("--all", action="store_true", help="Glob for conanfile.py recursively from the current directory to find all recipes")
     parser.add_argument("--verify", action="store_true", help="Verify the recipe name found by invoking 'conan inspect'. This is slow.")
+    parser.add_argument("--downstream-from", help="Specify the recipe to start from, and add all downstream consumers of it, recursively. Implies --all.")
     parser.add_argument("recipe_paths", nargs="*", help="One or more paths to conanfile.py for each recipe to organise into build order.")
     args = parser.parse_args()
-    scan(args.recipe_paths, find_all=args.all, verify=args.verify)
+    buckets = scan(args.recipe_paths, find_all=args.all, verify=args.verify, downstream_from=args.downstream_from)
+
+    logging.critical(f"There were {len(buckets)} buckets of packages determined")
+    if args.downstream_from:
+        logging.critical("Listing from the downstream recipe that depends on it (recursively), this is the package build order:")
+    else:
+        logging.critical("Listing from fewest dependencies to most dependencies, this is the package build order:")
+    _print_buckets(buckets)
