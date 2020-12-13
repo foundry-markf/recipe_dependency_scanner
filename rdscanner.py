@@ -8,7 +8,6 @@ Input:
  - Either: a number of paths to conanfile.py's, and the dependencies just between them are determined
  - Or: --all, assumes to be running in the root directory containing recipes, loads all recipes, figures out their build order from the ground up
 
-# TODO: use regex instead of conan inspect --raw name to get the name, e.g. \s*name\s*=\s*"([A-zA-z0-9]+)"
 # TODO: alternative mode to -all, specify a starting (--start-recipe-path) point, instead of those with zero dependencies
 """
 
@@ -25,8 +24,9 @@ import sys
 # this will pick up the requires/build_requires attribute (scalar, list, tuple versions) as well as self.requires and self.build_requires
 # function arguments
 # the {} in the version match is for using {}.format to parameterise the version (should also pick up on f-strings)
-PACKAGEREFERENCE  = "['\"]([^/@][A-Za-z0-9_\.]+)/(?:[A-Za-z0-9\._{}^@^\"]+)[@|'\"]"
-PACKAGEREFERENCEREGEX = re.compile(PACKAGEREFERENCE)
+PACKAGENAME = r"\bname\s*=\s*['\"]([a-zA-z0-9]+)['\"]"
+PACKAGEREFERENCE  = r"['\"]([^/@][A-Za-z0-9_\.]+)/(?:[A-Za-z0-9\._{}^@^\"]+)[@|'\"]"
+PACKAGEREFERENCEREGEX = re.compile("|".join([PACKAGENAME, PACKAGEREFERENCE]))
 
 
 def _get_package_name(recipe_path):
@@ -35,19 +35,26 @@ def _get_package_name(recipe_path):
 
 
 def _get_recipe_dependents(recipe_path):
+    name = None
     dependents = []
     for i, line in enumerate(open(recipe_path, "rt")):
         for match in re.findall(PACKAGEREFERENCEREGEX, line):
-            logging.debug("Found dependent on line %s: %s" % (i+1, match))
-            dependents.append(match)
-    return dependents
+            if not match:
+                continue
+            if (match[0]):
+                logging.debug("Found name on line %s: '%s'" % (i+1, match[0]))
+                name = match[0]
+                continue
+            if (match[1]):
+                logging.debug("Found dependent on line %s: '%s'" % (i+1, match[1]))
+                dependents.append(match[1])
+    assert name, f"No name was found in {recipe_path}"
+    return name, dependents
 
 
-def scan(list_of_recipe_paths, find_all=False):
-    #if not list_of_recipe_paths:
+def scan(list_of_recipe_paths, find_all, verify):
     if find_all:
         list_of_recipe_paths = [path for path in pathlib.Path.cwd().glob("**/conanfile.py") if path.parent.name != "test_package"]
-        #list_of_recipe_paths = list_of_recipe_paths[:5] # TEMPORARY
     if not list_of_recipe_paths:
         logging.critical("No recipe paths were provided")
         sys.exit(1)
@@ -56,13 +63,15 @@ def scan(list_of_recipe_paths, find_all=False):
     logging.debug(f"{len(list_of_recipe_paths)} recipes to scan")
     for path in list_of_recipe_paths:
         logging.debug(f"Scanning recipe: {pathlib.Path.cwd() / path}")
-        pkg_name = _get_package_name(path)
-        logging.debug(f"Package name: {pkg_name}")
+        name, dependents = _get_recipe_dependents(path)
+        logging.debug(f"Package name: '{name}'")
+        if verify:
+            pkg_name_from_conan = _get_package_name(path)
+            assert name == pkg_name_from_conan, f"Inconsistent names found in {path}: Conan inspect: '{pkg_name_from_conan}'; regex: '{name}'"
         package = {
-            "name": pkg_name,
+            "name": name,
             "path": path
         }
-        dependents = _get_recipe_dependents(path)
         if dependents:
             package["dependents"] = dependents
         packages.append(package)
@@ -143,8 +152,9 @@ def scan(list_of_recipe_paths, find_all=False):
 
 if __name__ == "__main__":
     logging.getLogger().setLevel(os.environ.get("LOGLEVEL", "INFO"))
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--all", action="store_true")
-    parser.add_argument("recipe_paths", nargs="*")
+    parser = argparse.ArgumentParser(description="Scan recipes for dependencies to determine a build order of packages grouped into buckets that can be built in parallel")
+    parser.add_argument("--all", action="store_true", help="Glob for conanfile.py recursively from the current directory to find all recipes")
+    parser.add_argument("--verify", action="store_true", help="Verify the recipe name found by invoking 'conan inspect'. This is slow.")
+    parser.add_argument("recipe_paths", nargs="*", help="One or more paths to conanfile.py for each recipe to organise into build order.")
     args = parser.parse_args()
-    scan(args.recipe_paths, find_all=args.all)
+    scan(args.recipe_paths, find_all=args.all, verify=args.verify)
