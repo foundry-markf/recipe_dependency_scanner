@@ -73,7 +73,7 @@ def _get_package_names_from_buckets(buckets):
     """
     Get a list of names of all packages in all buckets.
     """
-    return [p["name"] for b in buckets for p in b]
+    return set([p["name"] for b in buckets for p in b])
 
 
 def scan(list_of_recipe_paths, find_all, verify, downstream_from):
@@ -214,7 +214,7 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
 
 def _print_buckets(buckets):
     for i, b in enumerate(buckets):
-        names = [p["name"] for p in b]
+        names = set([p["name"] for p in b])
         logging.critical(f"Bucket {i}: {names}")
 
 
