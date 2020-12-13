@@ -69,6 +69,13 @@ def _extract_recipe_details(recipe_path):
     return name, dependents
 
 
+def _get_package_names_from_buckets(buckets):
+    """
+    Get a list of names of all packages in all buckets.
+    """
+    return [p["name"] for b in buckets for p in b]
+
+
 def scan(list_of_recipe_paths, find_all, verify, downstream_from):
     """
     Scan the list of recipe paths, and convert to buckets of packages, satisfying dependencies, that can be built in parallel.
@@ -152,7 +159,7 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
     # continue until all packages are exhausted
     while packages:
         next_bucket = []
-        bucketed_names = [p["name"] for b in buckets for p in b]
+        bucketed_names = _get_package_names_from_buckets(buckets)
         logging.debug(f"Bucketed names so far: {bucketed_names}")
         for p in packages:
             logging.debug(f"Considering package dependencies for recipe: {p['name']}")
@@ -184,7 +191,7 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
         # cull any downstream recipes that don't have any of the bucketed packages as dependents
         up_to_bucket = 1
         for b in buckets[1:]:
-            bucketed_names = [p["name"] for b in buckets[:up_to_bucket] for p in b]
+            bucketed_names = _get_package_names_from_buckets(buckets[:up_to_bucket])
             to_cull = []
             for p in b:
                 found_any = False
