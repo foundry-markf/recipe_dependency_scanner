@@ -15,13 +15,23 @@ Input:
 TODO: does the --downstream-from option need to be expanded to have multiple starting points? possibly an unlikely use case
 """
 
+from dataclasses import dataclass
 import argparse
+import copy
 import logging
 import os
 import pathlib
 import re
 import subprocess
 import sys
+import typing
+
+
+@dataclass
+class PackageMeta:
+    recipe_path: pathlib.Path
+    dependents: typing.List[str]
+
 
 # see https://docs.conan.io/en/latest/reference/conanfile/attributes.html#name
 CONAN_PACKAGENAME = "[a-zA-Z0-9_][a-zA-Z0-9_\+\.-]{1,50}"
@@ -72,20 +82,31 @@ def _extract_recipe_details(recipe_path):
     return name, dependents
 
 
-def _get_package_names_from_buckets(buckets):
+def _get_package_names_from_buckets(
+    buckets: typing.List[typing.List[str]],
+) -> typing.List[str]:
     """
     Get a list of names of all packages in all buckets.
     """
-    return set([p["name"] for b in buckets for p in b])
+    names = []
+    for b in buckets:
+        for n in b:
+            assert n not in names
+        names.extend(b)
+    return names
 
 
-def scan(list_of_recipe_paths, find_all, verify, downstream_from):
+def scan(
+    list_of_recipe_paths, find_all, verify, downstream_from
+) -> typing.List[typing.List[str]]:
     """
     Scan the list of recipe paths, and convert to buckets of packages, satisfying dependencies, that can be built in parallel.
 
     Optionally scan the current directory for all conanfile.py files.
     Optionally verify the package names extracted by regex from the recipe files using slower conan CLI commands.
     Optionally find all downstream packages from a named starting recipe.
+
+    Returns list of list of package names. Each list's dependencies is fully satisfied by the previous lists.
     """
     if downstream_from:
         find_all = True
@@ -99,7 +120,7 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
         logging.critical("No recipe paths were provided")
         sys.exit(1)
 
-    packages = []
+    packages: typing.Dict[str, typing.List[PackageMeta]] = {}
     recipe_path_count = len(list_of_recipe_paths)
     logging.debug(f"{recipe_path_count} recipes to scan")
     for i, path in enumerate(list_of_recipe_paths):
@@ -113,33 +134,57 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
             assert (
                 name == pkg_name_from_conan
             ), f"Inconsistent names found in {path}: Conan inspect: '{pkg_name_from_conan}'; regex: '{name}'"
-        package = {"name": name, "path": path}
-        if dependents:
-            package["dependents"] = dependents
-        packages.append(package)
+        if name not in packages:
+            packages[name] = []
+        packages[name].append(PackageMeta(path, dependents))
 
     # might be some bad regexs, or packages not yet in the recipes folder
     # remove bad dependents
-    all_package_names = [p["name"] for p in packages]
-    for p in packages:
-        if not "dependents" in p:
-            continue
-        bad_dependent_names = []
-        for d in p["dependents"]:
-            if not d in all_package_names:
-                logging.debug(
-                    f"Recipe: {p['name']} dependent {d} not found in all package list"
-                )
-                bad_dependent_names.append(d)
-        for n in bad_dependent_names:
-            p["dependents"].remove(n)
+    all_package_names = packages.keys()
+    for name, meta_list in packages.items():
+        for meta in meta_list:
+            if not meta.dependents:
+                continue
+            bad_dependent_names = []
+            for d in meta.dependents:
+                if d == name:
+                    logging.debug(
+                        f"Recipe for '{name}' refers to itself in a dependency"
+                    )
+                    bad_dependent_names.append(d)
+                    continue
+                if not d in all_package_names:
+                    logging.debug(
+                        f"Recipe for '{name}' is dependent upon package '{d}' which is not found in the discovered package list"
+                    )
+                    bad_dependent_names.append(d)
+                    continue
+            for n in bad_dependent_names:
+                meta.dependents.remove(n)
 
     logging.debug("All packages found:")
-    for p in packages:
-        if "dependents" in p:
-            logging.debug(f"{p['name']}: {p['path']}: {p['dependents']}")
-        else:
-            logging.debug(f"{p['name']}: {p['path']}")
+    for name, meta_list in packages.items():
+        logging.debug("%s:", name)
+        for meta in meta_list:
+            logging.debug("\t%s", meta)
+
+    # sort the packages in the order of increasing dependent counts
+    p_order = {}
+    for name, meta_list in packages.items():
+        # this count is a bit weird, as it's a summation from all recipes under the name
+        dep_count = 0
+        for meta in meta_list:
+            dep_count += len(meta.dependents)
+        p_order[name] = dep_count
+    p_order = sorted(p_order.items(), key=lambda x: x[1])
+
+    ordered_packages = {}
+    for n, _ in p_order:
+        ordered_packages[n] = packages[n]
+    packages = ordered_packages
+
+    # record all packages, as the original is mutable
+    all_packages = copy.deepcopy(packages)
 
     # convert to buckets (assumes non cyclic dependencies)
     # this is between O(n) and O(n^2) complexity, as need to loop over a list reducing in size (at a variable rate) each iteration
@@ -154,20 +199,24 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
     #   - if nothing has been added to the next bucket - ERROR
 
     if downstream_from:
-        downstream_package = [
-            package for package in packages if package["name"] == downstream_from
-        ]
-        assert (
-            len(downstream_package) == 1
-        ), f"Unable to find the starting package called '{downstream_from}' in all recipe paths. Check the case."
+        assert downstream_from in packages
 
     buckets = []
     # those without any dependencies can be built initially
-    bucket0 = [package for package in packages if "dependents" not in package]
+    bucket0 = []
+    for name, meta_list in packages.items():
+        suitable = True
+        for meta in meta_list:
+            if meta.dependents:
+                suitable = False
+                break
+        if suitable:
+            bucket0.append(name)
     if bucket0:
+        # TODO: this would be weird if this wasn't always here for any given complex recipe collection
         buckets.append(bucket0)
         for p in bucket0:
-            packages.remove(p)
+            del packages[p]
     # now scan for all those remaining that can completely satisfy their dependencies in the existing buckets
     # once all packages that can be satisfied with existing buckets are found, these form the next bucket
     # continue until all packages are exhausted
@@ -175,19 +224,20 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
         next_bucket = []
         bucketed_names = _get_package_names_from_buckets(buckets)
         logging.debug(f"Bucketed names so far: {bucketed_names}")
-        for p in packages:
-            logging.debug(f"Considering package dependencies for recipe: {p['name']}")
-            found_all = True
-            for d in p["dependents"]:
-                logging.debug(f"\tLooking for {d}")
-                if d not in bucketed_names:
-                    found_all = False
-                    break
-            if found_all:
-                next_bucket.append(p)
+        for name, meta_list in packages.items():
+            logging.debug(f"Considering package dependencies for recipe: {name}")
+            found_all_deps = True
+            for meta in meta_list:
+                for d in meta.dependents:
+                    logging.debug(f"\tLooking for {d}")
+                    if d not in bucketed_names:
+                        found_all_deps = False
+                        break
+            if found_all_deps:
+                next_bucket.append(name)
         if next_bucket:
             for p in next_bucket:
-                packages.remove(p)
+                del packages[p]
             buckets.append(next_bucket)
         else:
             raise RuntimeError("Unable to resolve any packages that can be built next")
@@ -196,11 +246,9 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
         # this performs post-processing to cull the buckets of unnecessary packages
         # find the bucket that the downstream starting package lives in, removing earlier buckets
         while buckets:
-            found = [p for p in buckets[0] if p["name"] == downstream_from]
-            buckets.pop(0)
-            if found:
-                buckets.insert(0, found)
+            if downstream_from in buckets[0]:
                 break
+            buckets.pop(0)
 
         # cull any downstream recipes that don't have any of the bucketed packages as dependents
         up_to_bucket = 1
@@ -209,17 +257,16 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
             to_cull = []
             for p in b:
                 found_any = False
-                for d in p["dependents"]:
-                    logging.debug(f"\tLooking for {d}")
-                    if d in bucketed_names:
-                        found_any = True
-                        break
+                for meta in all_packages[p]:
+                    for d in meta.dependents:
+                        logging.debug(f"\tLooking for {d}")
+                        if d in bucketed_names:
+                            found_any = True
+                            break
                 if not found_any:
                     to_cull.append(p)
             for c in to_cull:
-                logging.debug(
-                    f"Culling unrelated '{c['name']}' from bucket {up_to_bucket}"
-                )
+                logging.debug(f"Culling unrelated '{c}' from bucket {up_to_bucket}")
                 b.remove(c)
             up_to_bucket += 1
         # there may now be empty buckets
@@ -230,7 +277,7 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
 
 def _print_buckets(buckets):
     for i, b in enumerate(buckets):
-        names = sorted(list(set([p["name"] for p in b])), key=str.casefold)
+        names = sorted(list(set([p for p in b])), key=str.casefold)
         logging.critical(f"Bucket {i}: {names}")
 
 
