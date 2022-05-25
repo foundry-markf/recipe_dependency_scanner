@@ -67,17 +67,18 @@ def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[s
     """
     name = None
     dependents = []
-    for i, line in enumerate(open(recipe_path, "rt")):
-        for match in re.findall(PACKAGEREFERENCEREGEX, line):
-            if not match:
-                continue
-            if match[0]:
-                logging.debug("Found name on line %s: '%s'" % (i + 1, match[0]))
-                name = match[0]
-                continue
-            if match[1]:
-                logging.debug("Found dependent on line %s: '%s'" % (i + 1, match[1]))
-                dependents.append(match[1])
+    with open(recipe_path, "rt", encoding="utf-8") as file:
+        for i, line in enumerate(file):
+            for match in re.findall(PACKAGEREFERENCEREGEX, line):
+                if not match:
+                    continue
+                if match[0]:
+                    logging.debug("Found name on line %s: '%s'" % (i + 1, match[0]))
+                    name = match[0]
+                    continue
+                if match[1]:
+                    logging.debug("Found dependent on line %s: '%s'" % (i + 1, match[1]))
+                    dependents.append(match[1])
     assert name, f"No name was found in {recipe_path}"
     return name, dependents
 
