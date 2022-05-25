@@ -34,7 +34,7 @@ class PackageMeta:
 
 
 # see https://docs.conan.io/en/latest/reference/conanfile/attributes.html#name
-CONAN_PACKAGENAME = "[a-zA-Z0-9_][a-zA-Z0-9_\+\.-]{1,50}"
+CONAN_PACKAGENAME = r"[a-zA-Z0-9_][a-zA-Z0-9_\+\.-]{1,50}"
 # regex to find the name attribute in a recipe
 PACKAGENAME_ATTR = rf"\s+name\b\s*=\s*['\"]({CONAN_PACKAGENAME})['\"]\s+$"
 
@@ -156,7 +156,7 @@ def scan(
                     )
                     bad_dependent_names.append(d)
                     continue
-                if not d in all_package_names:
+                if d not in all_package_names:
                     logging.debug(
                         f"Recipe for '{name}' is dependent upon package '{d}' which is not found in the discovered package list"
                     )
