@@ -29,7 +29,7 @@ import typing
 
 @dataclass
 class PackageMeta:
-    recipe_path: pathlib.Path
+    recipe_path: str
     dependents: typing.List[str]
 
 
@@ -50,7 +50,7 @@ PACKAGEREFERENCE = (
 PACKAGEREFERENCEREGEX = re.compile("|".join([PACKAGENAME_ATTR, PACKAGEREFERENCE]))
 
 
-def _get_package_name(recipe_path):
+def _get_package_name(recipe_path: str) -> str:
     """
     Get the package name using 'conan inspect'.
     This is slow.
@@ -60,7 +60,7 @@ def _get_package_name(recipe_path):
     return output.decode("utf8").strip()
 
 
-def _extract_recipe_details(recipe_path):
+def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[str]]:
     """
     Extract package name and a list of dependent package names (runtime and buildtime) from the specified recipe.
     Returns a tuple containing a string and a list of strings.
@@ -97,7 +97,10 @@ def _get_package_names_from_buckets(
 
 
 def scan(
-    list_of_recipe_paths, find_all, verify, downstream_from
+    list_of_recipe_paths: typing.List[str],
+    find_all: bool,
+    verify: bool,
+    downstream_from: typing.Optional[str],
 ) -> typing.List[typing.List[str]]:
     """
     Scan the list of recipe paths, and convert to buckets of packages, satisfying dependencies, that can be built in parallel.
@@ -112,7 +115,7 @@ def scan(
         find_all = True
     if find_all:
         list_of_recipe_paths = [
-            path
+            str(path)
             for path in pathlib.Path.cwd().glob("**/conanfile.py")
             if not path.parent.name.startswith("test_")
         ]
@@ -176,10 +179,10 @@ def scan(
         for meta in meta_list:
             dep_count += len(meta.dependents)
         p_order[name] = dep_count
-    p_order = sorted(p_order.items(), key=lambda x: x[1])
+    ordered_tuple = sorted(p_order.items(), key=lambda x: x[1])
 
     ordered_packages = {}
-    for n, _ in p_order:
+    for n, _ in ordered_tuple:
         ordered_packages[n] = packages[n]
     packages = ordered_packages
 
@@ -275,7 +278,7 @@ def scan(
     return buckets
 
 
-def _print_buckets(buckets):
+def _print_buckets(buckets: typing.List[typing.List[str]]) -> None:
     for i, b in enumerate(buckets):
         names = sorted(list(set([p for p in b])), key=str.casefold)
         logging.critical(f"Bucket {i}: {names}")
