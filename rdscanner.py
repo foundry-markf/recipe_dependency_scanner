@@ -73,11 +73,11 @@ def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[s
                 if not match:
                     continue
                 if match[0]:
-                    logging.debug("Found name on line %s: '%s'" % (i + 1, match[0]))
+                    logging.debug("Found name on line %s: '%s'", i + 1, match[0])
                     name = match[0]
                     continue
                 if match[1]:
-                    logging.debug("Found dependent on line %s: '%s'" % (i + 1, match[1]))
+                    logging.debug("Found dependent on line %s: '%s'", i + 1, match[1])
                     dependents.append(match[1])
     assert name, f"No name was found in {recipe_path}"
     return name, dependents
@@ -126,13 +126,13 @@ def scan(
 
     packages: typing.Dict[str, typing.List[PackageMeta]] = {}
     recipe_path_count = len(list_of_recipe_paths)
-    logging.debug(f"{recipe_path_count} recipes to scan")
+    logging.debug("%d recipes to scan", recipe_path_count)
     for i, path in enumerate(list_of_recipe_paths):
         logging.debug(
-            f"Scanning recipe {i}/{recipe_path_count}: {pathlib.Path.cwd() / path}"
+            "Scanning recipe %d/%d: %s", i, recipe_path_count, pathlib.Path.cwd() / path
         )
         name, dependents = _extract_recipe_details(path)
-        logging.debug(f"Package name: '{name}'")
+        logging.debug("Package name: '%s'", name)
         if verify:
             pkg_name_from_conan = _get_package_name(path)
             assert (
@@ -153,13 +153,15 @@ def scan(
             for d in meta.dependents:
                 if d == name:
                     logging.debug(
-                        f"Recipe for '{name}' refers to itself in a dependency"
+                        "Recipe for '%s' refers to itself in a dependency", name
                     )
                     bad_dependent_names.append(d)
                     continue
                 if d not in all_package_names:
                     logging.debug(
-                        f"Recipe for '{name}' is dependent upon package '{d}' which is not found in the discovered package list"
+                        "Recipe for '%s' is dependent upon package '%s' which is not found in the discovered package list",
+                        name,
+                        d,
                     )
                     bad_dependent_names.append(d)
                     continue
@@ -227,13 +229,13 @@ def scan(
     while packages:
         next_bucket = []
         bucketed_names = _get_package_names_from_buckets(buckets)
-        logging.debug(f"Bucketed names so far: {bucketed_names}")
+        logging.debug("Bucketed names so far: %s", bucketed_names)
         for name, meta_list in packages.items():
-            logging.debug(f"Considering package dependencies for recipe: {name}")
+            logging.debug("Considering package dependencies for recipe: %s", name)
             found_all_deps = True
             for meta in meta_list:
                 for d in meta.dependents:
-                    logging.debug(f"\tLooking for {d}")
+                    logging.debug("\tLooking for %s", d)
                     if d not in bucketed_names:
                         found_all_deps = False
                         break
@@ -263,14 +265,14 @@ def scan(
                 found_any = False
                 for meta in all_packages[p]:
                     for d in meta.dependents:
-                        logging.debug(f"\tLooking for {d}")
+                        logging.debug("\tLooking for %s", d)
                         if d in bucketed_names:
                             found_any = True
                             break
                 if not found_any:
                     to_cull.append(p)
             for c in to_cull:
-                logging.debug(f"Culling unrelated '{c}' from bucket {up_to_bucket}")
+                logging.debug("Culling unrelated '%s' from bucket %d", c, up_to_bucket)
                 b.remove(c)
             up_to_bucket += 1
         # there may now be empty buckets
@@ -282,7 +284,7 @@ def scan(
 def _print_buckets(buckets: typing.List[typing.List[str]]) -> None:
     for i, b in enumerate(buckets):
         names = sorted(list(set([p for p in b])), key=str.casefold)
-        logging.critical(f"Bucket {i}: {names}")
+        logging.critical("Bucket %d: %s", i, names)
 
 
 if __name__ == "__main__":
@@ -317,10 +319,11 @@ if __name__ == "__main__":
         downstream_from=args.downstream_from,
     )
 
-    logging.critical(f"There were {len(buckets)} buckets of packages determined")
+    logging.critical("There were %d buckets of packages determined", len(buckets))
     if args.downstream_from:
         logging.critical(
-            f"Listing from package {args.downstream_from} to all consuming downstream recipes (recursively), this is the package build order:"
+            "Listing from package %s to all consuming downstream recipes (recursively), this is the package build order:",
+            args.downstream_from,
         )
     else:
         logging.critical(
