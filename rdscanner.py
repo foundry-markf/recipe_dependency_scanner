@@ -94,9 +94,10 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
         sys.exit(1)
 
     packages = []
-    logging.debug(f"{len(list_of_recipe_paths)} recipes to scan")
-    for path in list_of_recipe_paths:
-        logging.debug(f"Scanning recipe: {pathlib.Path.cwd() / path}")
+    recipe_path_count = len(list_of_recipe_paths)
+    logging.debug(f"{recipe_path_count} recipes to scan")
+    for i, path in enumerate(list_of_recipe_paths):
+        logging.debug(f"Scanning recipe {i}/{recipe_path_count}: {pathlib.Path.cwd() / path}")
         name, dependents = _extract_recipe_details(path)
         logging.debug(f"Package name: '{name}'")
         if verify:
