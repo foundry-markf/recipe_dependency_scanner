@@ -88,7 +88,7 @@ def scan(list_of_recipe_paths, find_all, verify, downstream_from):
     if downstream_from:
         find_all=True
     if find_all:
-        list_of_recipe_paths = [path for path in pathlib.Path.cwd().glob("**/conanfile.py") if path.parent.name != "test_package"]
+        list_of_recipe_paths = [path for path in pathlib.Path.cwd().glob("**/conanfile.py") if not path.parent.name.startswith("test_")]
     if not list_of_recipe_paths:
         logging.critical("No recipe paths were provided")
         sys.exit(1)
