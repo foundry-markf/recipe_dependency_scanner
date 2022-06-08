@@ -145,6 +145,7 @@ def scan(
     # might be some bad regexs, or packages not yet in the recipes folder
     # remove bad dependents
     all_package_names = packages.keys()
+    all_bad_dependent_names = []
     for name, meta_list in packages.items():
         for meta in meta_list:
             if not meta.dependents:
@@ -167,12 +168,18 @@ def scan(
                     continue
             for n in bad_dependent_names:
                 meta.dependents.remove(n)
+            all_bad_dependent_names.extend(bad_dependent_names)
 
     logging.debug("All packages found:")
     for name, meta_list in packages.items():
         logging.debug("%s:", name)
         for meta in meta_list:
             logging.debug("\t%s", meta)
+
+    if all_bad_dependent_names:
+        logging.debug("Dependents that have no knowledge")
+        for bad in all_bad_dependent_names:
+            logging.debug("\t%s", bad)
 
     # sort the packages in the order of increasing dependent counts
     p_order = {}
