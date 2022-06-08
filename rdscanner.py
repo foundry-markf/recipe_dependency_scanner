@@ -43,7 +43,7 @@ PACKAGENAME_ATTR = rf"\s+name\b\s*=\s*['\"]({CONAN_PACKAGENAME})['\"]\s+$"
 # function arguments
 # the {} in the version match is for using {}.format to parameterise the version (should also pick up on f-strings)
 PACKAGEREFERENCE = (
-    rf"['\"]([^/@]{CONAN_PACKAGENAME})/(?:[A-Za-z0-9\._{{}}^@^\"]+)[@|'\"]"
+    rf"[\s+\(][\"\']({CONAN_PACKAGENAME})/({CONAN_PACKAGENAME})[\"\'@]"
 )
 
 # combined regex
@@ -73,11 +73,11 @@ def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[s
                 if not match:
                     continue
                 if match[0]:
-                    logging.debug("Found name on line %s: '%s'", i + 1, match[0])
+                    logging.debug("Found name on line %d: '%s'", i + 1, match[0])
                     name = match[0]
                     continue
                 if match[1]:
-                    logging.debug("Found dependent on line %s: '%s'", i + 1, match[1])
+                    logging.debug("Found dependent on line %d: '%s'", i + 1, match[1])
                     dependents.append(match[1])
     assert name, f"No name was found in {recipe_path}"
     return name, dependents
@@ -246,7 +246,12 @@ def scan(
                 del packages[p]
             buckets.append(next_bucket)
         else:
-            raise RuntimeError("Unable to resolve any packages that can be built next")
+            break
+
+    if packages:
+        logging.debug("Unable to break down the package list any more")
+        buckets.append(packages)
+        packages = None
 
     if downstream_from:
         # this performs post-processing to cull the buckets of unnecessary packages
