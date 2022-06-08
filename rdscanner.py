@@ -41,10 +41,9 @@ PACKAGENAME_ATTR = rf"\s+name\b\s*=\s*['\"]({CONAN_PACKAGENAME})['\"]\s+$"
 # regex that scans for "name/version[@" that maps to the name and version of a Conan package reference
 # this will pick up the requires/build_requires attribute (scalar, list, tuple versions) as well as self.requires and self.build_requires
 # function arguments
-# the {} in the version match is for using {}.format to parameterise the version (should also pick up on f-strings)
-# TODO: cannot pick up CutPI dependency on cuda
+# the |{} in the version match is for using {}.format to parameterise the version (should also pick up on f-strings)
 PACKAGEREFERENCE = (
-    rf"[\s+\[\(][\"\']({CONAN_PACKAGENAME})/({CONAN_PACKAGENAME})[\"\'@]"
+    rf"[\s+\[\(][\"\']({CONAN_PACKAGENAME})/({CONAN_PACKAGENAME}|{{}})[\"\'@]"
 )
 
 # combined regex
