@@ -281,10 +281,15 @@ def scan(
     return buckets
 
 
-def _print_buckets(buckets: typing.List[typing.List[str]]) -> None:
+def _print_buckets(buckets: typing.List[typing.List[str]], flat: bool) -> None:
     for i, b in enumerate(buckets):
         names = sorted(list(set([p for p in b])), key=str.casefold)
-        logging.critical("Bucket %d: %s", i, names)
+        if flat:
+            print(f"= Bucket {i} =")
+            for name in names:
+                print(name)
+        else:
+            logging.critical("Bucket %d: %s", i, names)
 
 
 if __name__ == "__main__":
@@ -296,6 +301,11 @@ if __name__ == "__main__":
         "--all",
         action="store_true",
         help="Glob for conanfile.py recursively from the current directory to find all recipes",
+    )
+    parser.add_argument(
+        "--flat",
+        action="store_true",
+        help="Display output as a flattened list",
     )
     parser.add_argument(
         "--verify",
@@ -329,4 +339,4 @@ if __name__ == "__main__":
         logging.critical(
             "Listing from fewest dependencies to most dependencies, this is the package build order:"
         )
-    _print_buckets(buckets)
+    _print_buckets(buckets, args.flat)
