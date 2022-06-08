@@ -230,14 +230,32 @@ def scan(
         next_bucket = []
         bucketed_names = _get_package_names_from_buckets(buckets)
         logging.debug("Bucketed names so far: %s", bucketed_names)
+        logging.debug("Packages remaining: %s", [name for name, _ in packages.items()])
+        not_found = []
         for name, meta_list in packages.items():
             logging.debug("Considering package dependencies for recipe: %s", name)
             found_all_deps = True
+            # if we've no contenders yet, but a failed search is what we're looking for now
+            # figure out if we can pull this out one (it mustn't depend on anything in the outstanding list)
+            if not next_bucket and name in not_found:
+                logging.debug("\t%s is a potential qualifier to pull out", name)
+                good = True
+                for meta in meta_list:
+                    for d in meta.dependents:
+                        # one circular argument, Qt and jom
+                        if d in packages and not (d == "jom" and name == "Qt"):
+                            logging.debug("\t\tbut dependency %s is also in the current list so no", d)
+                            good = False
+                            break
+                if good:
+                    next_bucket.append(name)
+                    continue
             for meta in meta_list:
                 for d in meta.dependents:
                     logging.debug("\tLooking for %s", d)
                     if d not in bucketed_names:
                         found_all_deps = False
+                        not_found.append(d)
                         break
             if found_all_deps:
                 next_bucket.append(name)
@@ -246,12 +264,7 @@ def scan(
                 del packages[p]
             buckets.append(next_bucket)
         else:
-            break
-
-    if packages:
-        logging.debug("Unable to break down the package list any more")
-        buckets.append(packages)
-        packages = None
+            raise RuntimeError(f"Unable to break down the package list into ordered buckets any more: left over {packages}")
 
     if downstream_from:
         # this performs post-processing to cull the buckets of unnecessary packages
