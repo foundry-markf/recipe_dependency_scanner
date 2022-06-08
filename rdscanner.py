@@ -43,7 +43,7 @@ PACKAGENAME_ATTR = rf"\s+name\b\s*=\s*['\"]({CONAN_PACKAGENAME})['\"]\s+$"
 # function arguments
 # the {} in the version match is for using {}.format to parameterise the version (should also pick up on f-strings)
 PACKAGEREFERENCE = (
-    rf"[\s+\(][\"\']({CONAN_PACKAGENAME})/({CONAN_PACKAGENAME})[\"\'@]"
+    rf"[\s+\[\(][\"\']({CONAN_PACKAGENAME})/({CONAN_PACKAGENAME})[\"\'@]"
 )
 
 # combined regex
