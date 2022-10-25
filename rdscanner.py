@@ -320,13 +320,14 @@ def _print_buckets(buckets: typing.List[typing.List[str]], flat: bool) -> None:
 def _save_mxgraph(packages: typing.Dict[str, typing.List[PackageMeta]], output_path: str) -> None:
     import pygraphviz as pgv
     from graphviz2drawio import graphviz2drawio
-    G = pgv.AGraph()
+    G = pgv.AGraph(rankdir="LR", directed=True, strict=True)
     for name in packages.keys():
         G.add_node(name)
     for name, deps in packages.items():
         for dep in deps:
             for d in dep.dependents:
-                G.add_edge(name, d)
+                G.add_edge(d, name)
+    G = G.acyclic()
     xml = graphviz2drawio.convert(G)
     with open(output_path, "wt") as out:
         out.write(xml)
