@@ -102,7 +102,7 @@ def scan(
     find_all: bool,
     verify: bool,
     downstream_from: typing.Optional[str],
-) -> typing.List[typing.List[str]]:
+) -> typing.Tuple[typing.List[typing.List[str]], typing.Dict[str, typing.List[PackageMeta]]]:
     """
     Scan the list of recipe paths, and convert to buckets of packages, satisfying dependencies, that can be built in parallel.
 
@@ -303,7 +303,7 @@ def scan(
         # there may now be empty buckets
         buckets = [b for b in buckets if b]
 
-    return buckets
+    return buckets, all_packages
 
 
 def _print_buckets(buckets: typing.List[typing.List[str]], flat: bool) -> None:
@@ -315,6 +315,21 @@ def _print_buckets(buckets: typing.List[typing.List[str]], flat: bool) -> None:
                 print(name)
         else:
             logging.critical("Bucket %d: %s", i, names)
+
+
+def _save_mxgraph(packages: typing.Dict[str, typing.List[PackageMeta]], output_path: str) -> None:
+    import pygraphviz as pgv
+    from graphviz2drawio import graphviz2drawio
+    G = pgv.AGraph()
+    for name in packages.keys():
+        G.add_node(name)
+    for name, deps in packages.items():
+        for dep in deps:
+            for d in dep.dependents:
+                G.add_edge(name, d)
+    xml = graphviz2drawio.convert(G)
+    with open(output_path, "wt") as out:
+        out.write(xml)
 
 
 if __name__ == "__main__":
@@ -342,12 +357,16 @@ if __name__ == "__main__":
         help="Specify the package name to start from, and add all downstream consumers of it, recursively. Implies --all in order to locate the package name in a recipe.",
     )
     parser.add_argument(
+        "--mxgraph-out",
+        help="Specify the output path for an mxgraph",
+    )
+    parser.add_argument(
         "recipe_paths",
         nargs="*",
         help="One or more paths to conanfile.py for each recipe to organise into build order.",
     )
     args = parser.parse_args()
-    buckets = scan(
+    buckets, packages = scan(
         args.recipe_paths,
         find_all=args.all,
         verify=args.verify,
@@ -365,3 +384,5 @@ if __name__ == "__main__":
             "Listing from fewest dependencies to most dependencies, this is the package build order:"
         )
     _print_buckets(buckets, args.flat)
+    if args.mxgraph_out:
+        _save_mxgraph(packages, args.mxgraph_out)

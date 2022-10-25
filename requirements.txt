@@ -1,0 +1,2 @@
+pygraphviz --global-option=build_ext --global-option="-I/Users/mark.final/Thirdparty/graphviz/include/" --global-option="-L/Users/mark.final/Thirdparty/graphviz/lib/"
+graphviz2drawio
