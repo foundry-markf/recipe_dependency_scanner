@@ -333,16 +333,10 @@ def _save_mxgraph(buckets: typing.List[typing.List[str]], packages: typing.Dict[
         9: "#666666",
     }
     G = pgv.AGraph(rankdir="LR", directed=True, strict=True)
-    for name in packages.keys():
-        try:
-            for i, b in enumerate(buckets):
-                if name in b:
-                    colour = colours[i]
-                    break
-        except KeyError:
-            logging.warning("No colour set for bucket index %d", i)
-            colour = "white"
-        G.add_node(name, fill=colour)
+    for i, b in enumerate(buckets):
+        g = G.add_subgraph(f"Bucket {i}")
+        for name in reversed(sorted(list(set([p for p in b])), key=str.casefold)):
+            g.add_node(name, fill=colours[i])
     for name, deps in packages.items():
         for dep in deps:
             for d in dep.dependents:
