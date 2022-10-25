@@ -317,12 +317,32 @@ def _print_buckets(buckets: typing.List[typing.List[str]], flat: bool) -> None:
             logging.critical("Bucket %d: %s", i, names)
 
 
-def _save_mxgraph(packages: typing.Dict[str, typing.List[PackageMeta]], output_path: str) -> None:
+def _save_mxgraph(buckets: typing.List[typing.List[str]], packages: typing.Dict[str, typing.List[PackageMeta]], output_path: str) -> None:
     import pygraphviz as pgv
     from graphviz2drawio import graphviz2drawio
+    colours = {
+        0: "#FFFFFF",
+        1: "#EEEEEE",
+        2: "#DDDDDD",
+        3: "#CCCCCC",
+        4: "#BBBBBB",
+        5: "#AAAAAA",
+        6: "#999999",
+        7: "#888888",
+        8: "#777777",
+        9: "#666666",
+    }
     G = pgv.AGraph(rankdir="LR", directed=True, strict=True)
     for name in packages.keys():
-        G.add_node(name)
+        try:
+            for i, b in enumerate(buckets):
+                if name in b:
+                    colour = colours[i]
+                    break
+        except KeyError:
+            logging.warning("No colour set for bucket index %d", i)
+            colour = "white"
+        G.add_node(name, fill=colour)
     for name, deps in packages.items():
         for dep in deps:
             for d in dep.dependents:
@@ -386,4 +406,4 @@ if __name__ == "__main__":
         )
     _print_buckets(buckets, args.flat)
     if args.mxgraph_out:
-        _save_mxgraph(packages, args.mxgraph_out)
+        _save_mxgraph(buckets, packages, args.mxgraph_out)
