@@ -336,7 +336,7 @@ def _save_mxgraph(buckets: typing.List[typing.List[str]], packages: typing.Dict[
     for i, b in enumerate(buckets):
         g = G.add_subgraph(f"Bucket {i}")
         for name in reversed(sorted(list(set([p for p in b])), key=str.casefold)):
-            g.add_node(name, fill=colours[i])
+            g.add_node(name, fill=colours[i], shape="box")
     for name, deps in packages.items():
         for dep in deps:
             for d in dep.dependents:
