@@ -358,6 +358,7 @@ def _save_mxgraph(buckets: typing.List[typing.List[str]], packages: typing.Dict[
     xml = graphviz2drawio.convert(G)
     with open(output_path, "wt") as out:
         out.write(xml)
+    logging.info("Written out mxgraph to %s", output_path)
 
 
 if __name__ == "__main__":
