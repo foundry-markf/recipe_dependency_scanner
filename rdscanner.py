@@ -279,6 +279,8 @@ def scan(
         while buckets:
             if downstream_from in buckets[0]:
                 break
+            for name in buckets[0]:
+                del all_packages[name]
             buckets.pop(0)
 
         # cull any downstream recipes that don't have any of the bucketed packages as dependents
@@ -299,9 +301,20 @@ def scan(
             for c in to_cull:
                 logging.debug("Culling unrelated '%s' from bucket %d", c, up_to_bucket)
                 b.remove(c)
+                del all_packages[c]
             up_to_bucket += 1
         # there may now be empty buckets
         buckets = [b for b in buckets if b]
+
+        # ensure that any dependents referencing deleted packages are also deleted
+        for package, pkg_meta in all_packages.items():
+            for meta in pkg_meta:
+                to_delete = []
+                for dep in meta.dependents:
+                    if dep not in all_packages:
+                        to_delete.append(dep)
+                for td in to_delete:
+                    meta.dependents.remove(td)
 
     return buckets, all_packages
 
