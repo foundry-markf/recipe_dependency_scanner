@@ -36,16 +36,18 @@ class PackageMeta:
 
 
 # see https://docs.conan.io/en/latest/reference/conanfile/attributes.html#name
-CONAN_PACKAGENAME = r"[a-zA-Z0-9_][a-zA-Z0-9_\+\.-]{1,50}"
+# changed {1,50} to {0,50} to allow for single version strings with ranges
+CONAN_PACKAGENAME = r"[a-zA-Z0-9_][a-zA-Z0-9_\+\.-]{0,50}"
 # regex to find the name attribute in a recipe
 PACKAGENAME_ATTR = rf"\s+name\b\s*=\s*['\"]({CONAN_PACKAGENAME})['\"]\s+$"
 
-# regex that scans for "name/version[@" that maps to the name and version of a Conan package reference
+# regex that scans for "name/version[@..." that maps to the name and version of a Conan package reference
 # this will pick up the requires/build_requires attribute (scalar, list, tuple versions) as well as self.requires and self.build_requires
 # function arguments
 # the |{} in the version match is for using {}.format to parameterise the version (should also pick up on f-strings)
+# the (?:\[~)? and (?:\])?
 PACKAGEREFERENCE = (
-    rf"[\s+\[\(][\"\']({CONAN_PACKAGENAME})/({CONAN_PACKAGENAME}|{{}})[\"\'@]"
+    rf"[\s+\[\(][\"\']({CONAN_PACKAGENAME})/(?:\[~)?({CONAN_PACKAGENAME}|{{}})(?:\])?[\"\'@]"
 )
 
 # combined regex
