@@ -72,6 +72,8 @@ def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[s
     dependents = []
     is_header_only = False
     has_build_method = False
+    has_settings = False
+    has_options = False
     with open(recipe_path, "rt", encoding="utf-8") as file:
         build_method_indentation = None
         for i, line in enumerate(file):
@@ -85,6 +87,12 @@ def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[s
                 if match[1]:
                     logging.debug("Found dependent on line %d: '%s'", i + 1, match[1])
                     dependents.append(match[1])
+            if "settings =" in line.lstrip():
+                has_settings = True
+                continue
+            if "options =" in line.lstrip():
+                has_options = True
+                continue
             if "self.info.header_only()" in line:
                 is_header_only = True
                 continue
@@ -110,7 +118,8 @@ def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[s
                 build_method_indentation = None
 
     assert name, f"No name was found in {recipe_path}"
-    return name, dependents, is_header_only, has_build_method
+    # some header only libs have not used self.info.header_only()
+    return name, dependents, is_header_only or (not has_settings and not has_options), has_build_method
 
 
 def _get_package_names_from_buckets(
