@@ -32,6 +32,7 @@ class PackageMeta:
     recipe_path: str
     dependents: typing.List[str]
     is_header_only: bool
+    has_build_method: bool
 
 
 # see https://docs.conan.io/en/latest/reference/conanfile/attributes.html#name
@@ -61,15 +62,18 @@ def _get_package_name(recipe_path: str) -> str:
     return output.decode("utf8").strip()
 
 
-def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[str], bool]:
+def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[str], bool, bool]:
     """
     Extract package name and a list of dependent package names (runtime and buildtime) from the specified recipe.
-    Returns a tuple containing a string and a list of strings.
+    Also extracted is whether the recipe is marked header only, and whether there is a build method that does work.
+    Returns a tuple containing a string, a list of strings, and two bools.
     """
     name = None
     dependents = []
     is_header_only = False
+    has_build_method = False
     with open(recipe_path, "rt", encoding="utf-8") as file:
+        build_method_indentation = None
         for i, line in enumerate(file):
             for match in re.findall(PACKAGEREFERENCEREGEX, line):
                 if not match:
@@ -84,8 +88,29 @@ def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[s
             if "self.info.header_only()" in line:
                 is_header_only = True
                 continue
+            if "def build(self)" in line:
+                build_method_indentation = len(line) - len(line.lstrip())
+                continue
+            if build_method_indentation:
+                stripped_line = line.lstrip()
+                if stripped_line.startswith("#"):
+                    continue
+                if stripped_line.startswith("pass"):
+                    continue
+                if stripped_line.startswith("print(") or stripped_line.startswith("self.output"):
+                    # some build methods are just printing message!!!
+                    continue
+                current_indentation = len(line) - len(stripped_line)
+                if current_indentation <= build_method_indentation:
+                    # we're out of the build method, not having encountered any useful statements
+                    build_method_indentation = None
+                    continue
+                # has build instructions
+                has_build_method = True
+                build_method_indentation = None
+
     assert name, f"No name was found in {recipe_path}"
-    return name, dependents, is_header_only
+    return name, dependents, is_header_only, has_build_method
 
 
 def _get_package_names_from_buckets(
@@ -136,7 +161,7 @@ def scan(
         logging.debug(
             "Scanning recipe %d/%d: %s", i, recipe_path_count, pathlib.Path.cwd() / path
         )
-        name, dependents, is_header_only = _extract_recipe_details(path)
+        name, dependents, is_header_only, has_build_method = _extract_recipe_details(path)
         logging.debug("Package name: '%s'", name)
         if verify:
             pkg_name_from_conan = _get_package_name(path)
@@ -145,7 +170,7 @@ def scan(
             ), f"Inconsistent names found in {path}: Conan inspect: '{pkg_name_from_conan}'; regex: '{name}'"
         if name not in packages:
             packages[name] = []
-        packages[name].append(PackageMeta(path, dependents, is_header_only))
+        packages[name].append(PackageMeta(path, dependents, is_header_only, has_build_method))
 
     # might be some bad regexs, or packages not yet in the recipes folder
     # remove bad dependents
@@ -332,10 +357,12 @@ def _print_buckets(buckets: typing.List[typing.List[str]], packages: typing.Dict
             for name in names:
                 if packages[name][0].is_header_only:
                     print(f"{name} (H)")
+                elif not packages[name][0].has_build_method:
+                    print(f"{name} (BIN)")
                 else:
                     print(name)
         else:
-            annotated_names = [f"{name} (H)" if packages[name][0].is_header_only else name for name in names]
+            annotated_names = [f"{name} (H)" if packages[name][0].is_header_only else f"{name} (BIN)" if not packages[name][0].has_build_method else name for name in names]
             logging.critical("Bucket %d: %s", i, annotated_names)
 
 
@@ -355,12 +382,15 @@ def _save_mxgraph(buckets: typing.List[typing.List[str]], packages: typing.Dict[
         9: "#666666",
     }
     header_only_colour = "#FFFF00"
+    prepackaged_binary_package_color = "#00FFFF"
     G = pgv.AGraph(rankdir="LR", directed=True, strict=True)
     for i, b in enumerate(buckets):
         g = G.add_subgraph(f"Bucket {i}")
         for name in reversed(sorted(list(set([p for p in b])), key=str.casefold)):
             if packages[name][0].is_header_only:
                 g.add_node(name, fill=header_only_colour, shape="box")
+            elif not packages[name][0].has_build_method:
+                g.add_node(name, fill=prepackaged_binary_package_color, shape="box")
             else:
                 g.add_node(name, fill=colours[i], shape="box")
     for name, deps in packages.items():
