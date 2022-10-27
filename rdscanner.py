@@ -30,9 +30,11 @@ import typing
 @dataclass
 class PackageMeta:
     recipe_path: str
+    pkgname: str
     dependents: typing.List[str]
     is_header_only: bool
     has_build_method: bool
+    recipe_loc: int
 
 
 # see https://docs.conan.io/en/latest/reference/conanfile/attributes.html#name
@@ -76,9 +78,11 @@ def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[s
     has_build_method = False
     has_settings = False
     has_options = False
+    loc = 0
     with open(recipe_path, "rt", encoding="utf-8") as file:
         build_method_indentation = None
         for i, line in enumerate(file):
+            loc = loc + 1
             for match in re.findall(PACKAGEREFERENCEREGEX, line):
                 if not match:
                     continue
@@ -121,7 +125,7 @@ def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[s
 
     assert name, f"No name was found in {recipe_path}"
     # some header only libs have not used self.info.header_only()
-    return name, dependents, is_header_only or (not has_settings and not has_options), has_build_method
+    return name, dependents, is_header_only or (not has_settings and not has_options), has_build_method, loc
 
 
 def _get_package_names_from_buckets(
@@ -172,7 +176,7 @@ def scan(
         logging.debug(
             "Scanning recipe %d/%d: %s", i, recipe_path_count, pathlib.Path.cwd() / path
         )
-        name, dependents, is_header_only, has_build_method = _extract_recipe_details(path)
+        name, dependents, is_header_only, has_build_method, recipe_loc = _extract_recipe_details(path)
         logging.debug("Package name: '%s'", name)
         if verify:
             pkg_name_from_conan = _get_package_name(path)
@@ -181,7 +185,7 @@ def scan(
             ), f"Inconsistent names found in {path}: Conan inspect: '{pkg_name_from_conan}'; regex: '{name}'"
         if name not in packages:
             packages[name] = []
-        packages[name].append(PackageMeta(path, dependents, is_header_only, has_build_method))
+        packages[name].append(PackageMeta(path, name, dependents, is_header_only, has_build_method, recipe_loc))
 
     # might be some bad regexs, or packages not yet in the recipes folder
     # remove bad dependents
@@ -348,7 +352,7 @@ def scan(
         buckets = [b for b in buckets if b]
 
         # ensure that any dependents referencing deleted packages are also deleted
-        for package, pkg_meta in all_packages.items():
+        for _, pkg_meta in all_packages.items():
             for meta in pkg_meta:
                 to_delete = []
                 for dep in meta.dependents:
@@ -360,50 +364,60 @@ def scan(
     return buckets, all_packages
 
 
+def _package_label(meta: PackageMeta) -> str:
+    if meta.is_header_only:
+        return f"{meta.pkgname} (H {meta.recipe_loc})"
+    if not meta.has_build_method:
+        return f"{meta.pkgname} (BIN {meta.recipe_loc})"
+    return f"{meta.pkgname} ({meta.recipe_loc})"
+
+
 def _print_buckets(buckets: typing.List[typing.List[str]], packages: typing.Dict[str, typing.List[PackageMeta]], flat: bool) -> None:
     for i, b in enumerate(buckets):
         names = sorted(list(set([p for p in b])), key=str.casefold)
         if flat:
             print(f"= Bucket {i} =")
             for name in names:
-                if packages[name][0].is_header_only:
-                    print(f"{name} (H)")
-                elif not packages[name][0].has_build_method:
-                    print(f"{name} (BIN)")
-                else:
-                    print(name)
+                print(_package_label(packages[name][0]))
         else:
-            annotated_names = [f"{name} (H)" if packages[name][0].is_header_only else f"{name} (BIN)" if not packages[name][0].has_build_method else name for name in names]
+            annotated_names = [_package_label(packages[name][0]) for name in names]
             logging.critical("Bucket %d: %s", i, annotated_names)
 
 
 def _save_mxgraph(buckets: typing.List[typing.List[str]], packages: typing.Dict[str, typing.List[PackageMeta]], output_path: str) -> None:
     import pygraphviz as pgv
     from graphviz2drawio import graphviz2drawio
-    colours = {
-        0: "#FFFFFF",
-        1: "#EEEEEE",
-        2: "#DDDDDD",
-        3: "#CCCCCC",
-        4: "#BBBBBB",
-        5: "#AAAAAA",
-        6: "#999999",
-        7: "#888888",
-        8: "#777777",
-        9: "#666666",
-    }
-    header_only_colour = "#FFFF00"
-    prepackaged_binary_package_color = "#00FFFF"
+
+    def _package_mxgraph_node(meta: PackageMeta, graph: pgv.AGraph) -> None:
+        colours = {
+            0: "#FFFFFF",
+            1: "#EEEEEE",
+            2: "#DDDDDD",
+            3: "#CCCCCC",
+            4: "#BBBBBB",
+            5: "#AAAAAA",
+            6: "#999999",
+            7: "#888888",
+            8: "#777777",
+            9: "#666666",
+        }
+        header_only_colour = "#FFFF00"
+        prepackaged_binary_package_color = "#00FFFF"
+
+        label = f"{meta.pkgname}\n{meta.recipe_loc} LOC"
+
+        if meta.is_header_only:
+            g.add_node(meta.pkgname, label=label, fill=header_only_colour, shape="box")
+        elif not meta.has_build_method:
+            g.add_node(meta.pkgname, label=label, fill=prepackaged_binary_package_color, shape="box")
+        else:
+            g.add_node(meta.pkgname, label=label, fill=colours[i], shape="box")
+
     G = pgv.AGraph(rankdir="LR", directed=True, strict=True)
     for i, b in enumerate(buckets):
         g = G.add_subgraph(f"Bucket {i}")
         for name in reversed(sorted(list(set([p for p in b])), key=str.casefold)):
-            if packages[name][0].is_header_only:
-                g.add_node(name, fill=header_only_colour, shape="box")
-            elif not packages[name][0].has_build_method:
-                g.add_node(name, fill=prepackaged_binary_package_color, shape="box")
-            else:
-                g.add_node(name, fill=colours[i], shape="box")
+            _package_mxgraph_node(packages[name][0], g)
     for name, deps in packages.items():
         for dep in deps:
             for d in dep.dependents:
