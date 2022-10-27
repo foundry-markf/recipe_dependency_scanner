@@ -31,6 +31,7 @@ import typing
 class PackageMeta:
     recipe_path: str
     dependents: typing.List[str]
+    is_header_only: bool
 
 
 # see https://docs.conan.io/en/latest/reference/conanfile/attributes.html#name
@@ -60,13 +61,14 @@ def _get_package_name(recipe_path: str) -> str:
     return output.decode("utf8").strip()
 
 
-def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[str]]:
+def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[str], bool]:
     """
     Extract package name and a list of dependent package names (runtime and buildtime) from the specified recipe.
     Returns a tuple containing a string and a list of strings.
     """
     name = None
     dependents = []
+    is_header_only = False
     with open(recipe_path, "rt", encoding="utf-8") as file:
         for i, line in enumerate(file):
             for match in re.findall(PACKAGEREFERENCEREGEX, line):
@@ -79,8 +81,11 @@ def _extract_recipe_details(recipe_path: str) -> typing.Tuple[str, typing.List[s
                 if match[1]:
                     logging.debug("Found dependent on line %d: '%s'", i + 1, match[1])
                     dependents.append(match[1])
+            if "self.info.header_only()" in line:
+                is_header_only = True
+                continue
     assert name, f"No name was found in {recipe_path}"
-    return name, dependents
+    return name, dependents, is_header_only
 
 
 def _get_package_names_from_buckets(
@@ -131,7 +136,7 @@ def scan(
         logging.debug(
             "Scanning recipe %d/%d: %s", i, recipe_path_count, pathlib.Path.cwd() / path
         )
-        name, dependents = _extract_recipe_details(path)
+        name, dependents, is_header_only = _extract_recipe_details(path)
         logging.debug("Package name: '%s'", name)
         if verify:
             pkg_name_from_conan = _get_package_name(path)
@@ -140,7 +145,7 @@ def scan(
             ), f"Inconsistent names found in {path}: Conan inspect: '{pkg_name_from_conan}'; regex: '{name}'"
         if name not in packages:
             packages[name] = []
-        packages[name].append(PackageMeta(path, dependents))
+        packages[name].append(PackageMeta(path, dependents, is_header_only))
 
     # might be some bad regexs, or packages not yet in the recipes folder
     # remove bad dependents
@@ -319,15 +324,19 @@ def scan(
     return buckets, all_packages
 
 
-def _print_buckets(buckets: typing.List[typing.List[str]], flat: bool) -> None:
+def _print_buckets(buckets: typing.List[typing.List[str]], packages: typing.Dict[str, typing.List[PackageMeta]], flat: bool) -> None:
     for i, b in enumerate(buckets):
         names = sorted(list(set([p for p in b])), key=str.casefold)
         if flat:
             print(f"= Bucket {i} =")
             for name in names:
-                print(name)
+                if packages[name][0].is_header_only:
+                    print(f"{name} (H)")
+                else:
+                    print(name)
         else:
-            logging.critical("Bucket %d: %s", i, names)
+            annotated_names = [f"{name} (H)" if packages[name][0].is_header_only else name for name in names]
+            logging.critical("Bucket %d: %s", i, annotated_names)
 
 
 def _save_mxgraph(buckets: typing.List[typing.List[str]], packages: typing.Dict[str, typing.List[PackageMeta]], output_path: str) -> None:
@@ -345,11 +354,15 @@ def _save_mxgraph(buckets: typing.List[typing.List[str]], packages: typing.Dict[
         8: "#777777",
         9: "#666666",
     }
+    header_only_colour = "#FFFF00"
     G = pgv.AGraph(rankdir="LR", directed=True, strict=True)
     for i, b in enumerate(buckets):
         g = G.add_subgraph(f"Bucket {i}")
         for name in reversed(sorted(list(set([p for p in b])), key=str.casefold)):
-            g.add_node(name, fill=colours[i], shape="box")
+            if packages[name][0].is_header_only:
+                g.add_node(name, fill=header_only_colour, shape="box")
+            else:
+                g.add_node(name, fill=colours[i], shape="box")
     for name, deps in packages.items():
         for dep in deps:
             for d in dep.dependents:
@@ -412,6 +425,6 @@ if __name__ == "__main__":
         logging.critical(
             "Listing from fewest dependencies to most dependencies, this is the package build order:"
         )
-    _print_buckets(buckets, args.flat)
+    _print_buckets(buckets, packages, args.flat)
     if args.mxgraph_out:
         _save_mxgraph(buckets, packages, args.mxgraph_out)
