@@ -35,6 +35,7 @@ class PackageMeta:
     is_header_only: bool
     has_build_method: bool
     recipe_loc: int
+    cumulative_recipe_loc: int
 
 
 # see https://docs.conan.io/en/latest/reference/conanfile/attributes.html#name
@@ -185,7 +186,7 @@ def scan(
             ), f"Inconsistent names found in {path}: Conan inspect: '{pkg_name_from_conan}'; regex: '{name}'"
         if name not in packages:
             packages[name] = []
-        packages[name].append(PackageMeta(path, name, dependents, is_header_only, has_build_method, recipe_loc))
+        packages[name].append(PackageMeta(path, name, dependents, is_header_only, has_build_method, recipe_loc, recipe_loc))
 
     # might be some bad regexs, or packages not yet in the recipes folder
     # remove bad dependents
@@ -225,6 +226,14 @@ def scan(
         logging.debug("Dependents that have no knowledge")
         for bad in all_bad_dependent_names:
             logging.debug("\t%s", bad)
+
+    if find_all:
+        for name, meta_list in packages.items():
+            for meta in meta_list:
+                cumulative_loc = meta.recipe_loc
+                for dep in meta.dependents:
+                    cumulative_loc += packages[dep][0].recipe_loc # TODO: not specific enough to know which meta to use
+                meta.cumulative_recipe_loc = cumulative_loc
 
     # sort the packages in the order of increasing dependent counts
     p_order = {}
@@ -372,7 +381,7 @@ def _package_label(meta: PackageMeta) -> str:
     return f"{meta.pkgname} ({meta.recipe_loc})"
 
 
-def _print_buckets(buckets: typing.List[typing.List[str]], packages: typing.Dict[str, typing.List[PackageMeta]], flat: bool) -> None:
+def _print_buckets_by_deps(buckets: typing.List[typing.List[str]], packages: typing.Dict[str, typing.List[PackageMeta]], flat: bool) -> None:
     for i, b in enumerate(buckets):
         names = sorted(list(set([p for p in b])), key=str.casefold)
         if flat:
@@ -382,6 +391,39 @@ def _print_buckets(buckets: typing.List[typing.List[str]], packages: typing.Dict
         else:
             annotated_names = [_package_label(packages[name][0]) for name in names]
             logging.critical("Bucket %d: %s", i, annotated_names)
+
+
+def _print_buckets_by_cumulative_loc(packages: typing.Dict[str, typing.List[PackageMeta]], num_buckets: int) -> None:
+    pkglist_cumulative_loc = {}
+    min_loc = 1000
+    max_loc = 0
+    for pkgname, metalist in packages.items():
+        pkglist_cumulative_loc[pkgname] = metalist[0].cumulative_recipe_loc
+        if metalist[0].cumulative_recipe_loc < min_loc:
+            min_loc = metalist[0].cumulative_recipe_loc
+        if metalist[0].cumulative_recipe_loc > max_loc:
+            max_loc = metalist[0].cumulative_recipe_loc
+    loc_range = max_loc - min_loc
+    bucket_size = loc_range // num_buckets
+    logging.info(f"Min/max CLOC: [{min_loc}, {max_loc}], split into {num_buckets} covering {bucket_size} LOC")
+    sorted_pkglist_cumulative_loc = dict(sorted(pkglist_cumulative_loc.items(), key=lambda item: item[1]))
+    #for k, v in sorted_pkglist_cumulative_loc.items():
+    #    print(k, v)
+    current_bound = min_loc + bucket_size
+    for bucket in range(0, num_buckets):
+        logging.critical(f"-- Bucket{bucket} : cumulative LOC <= {current_bound} --")
+        to_delete = []
+        for p, v in sorted_pkglist_cumulative_loc.items():
+            if v <= current_bound:
+                print(f"{p} [CLOC {v}]")
+                to_delete.append(p)
+        for p in to_delete:
+            del sorted_pkglist_cumulative_loc[p]
+        current_bound += bucket_size
+    # and whatever is left...
+    for p, v in sorted_pkglist_cumulative_loc.items():
+        if v <= current_bound:
+            print(f"{p} [CLOC {v}]")
 
 
 def _save_mxgraph(buckets: typing.List[typing.List[str]], packages: typing.Dict[str, typing.List[PackageMeta]], output_path: str) -> None:
@@ -458,6 +500,13 @@ if __name__ == "__main__":
         help="Specify the output path for an mxgraph",
     )
     parser.add_argument(
+        "--cumulative-loc-buckets",
+        type=int,
+        default=0,
+        choices=range(0,11),
+        help="Specify the number of buckets to use for ordering by cumulative lines of code",
+    )
+    parser.add_argument(
         "recipe_paths",
         nargs="*",
         help="One or more paths to conanfile.py for each recipe to organise into build order.",
@@ -470,16 +519,19 @@ if __name__ == "__main__":
         downstream_from=args.downstream_from,
     )
 
-    logging.critical("There were %d buckets of packages determined", len(buckets))
-    if args.downstream_from:
-        logging.critical(
-            "Listing from package %s to all consuming downstream recipes (recursively), this is the package build order:",
-            args.downstream_from,
-        )
+    if args.cumulative_loc_buckets > 0:
+        _print_buckets_by_cumulative_loc(packages, args.cumulative_loc_buckets)
     else:
-        logging.critical(
-            "Listing from fewest dependencies to most dependencies, this is the package build order:"
-        )
-    _print_buckets(buckets, packages, args.flat)
-    if args.mxgraph_out:
-        _save_mxgraph(buckets, packages, args.mxgraph_out)
+        logging.critical("There were %d buckets of packages determined", len(buckets))
+        if args.downstream_from:
+            logging.critical(
+                "Listing from package %s to all consuming downstream recipes (recursively), this is the package build order:",
+                args.downstream_from,
+            )
+        else:
+            logging.critical(
+                "Listing from fewest dependencies to most dependencies, this is the package build order:"
+            )
+        _print_buckets_by_deps(buckets, packages, args.flat)
+        if args.mxgraph_out:
+            _save_mxgraph(buckets, packages, args.mxgraph_out)
