@@ -404,7 +404,7 @@ def _save_mxgraph(buckets: typing.List[typing.List[str]], packages: typing.Dict[
         header_only_colour = "#FFFF00"
         prepackaged_binary_package_color = "#00FFFF"
 
-        label = f"{meta.pkgname}\n{meta.recipe_loc} LOC"
+        label = f"{meta.pkgname}\n{meta.recipe_loc} LOC\nEst: [?,?]\nRisk ?"
 
         if meta.is_header_only:
             g.add_node(meta.pkgname, label=label, fill=header_only_colour, shape="box")
